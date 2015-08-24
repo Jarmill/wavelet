@@ -174,19 +174,17 @@ def inplace_to_layer(old):
     while T > 1:
         half = T/2
         start = step/2
-        print (half, T), (start, step)
         new[half:T] = old[start::step]
 
         step <<= 1
         T >>= 1
-    print T, start
     new[0] = old[0]
     return new
 
-#s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
+s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
 #s = np.arange(8, dtype = np.float64)
 #s = np.array([9.0, 7.0, 3.0, 5.0])
-s = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
+#s = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
 #s = np.array([1.0, 3.0, -2.0, 1.5, -0.5, 2.0, 0.0, 1.0])
 ml = -1
 print s
@@ -195,10 +193,3 @@ print ds
 print inplace_to_layer(ds)
 ids = idb4(np.copy(ds), MAX_LAYER = ml)
 print ids
-"""
-#a = np.arange(8)
-print s
-os = layer_to_inplace(s)
-print os
-print inplace_to_layer(os)
-"""
