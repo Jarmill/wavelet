@@ -153,7 +153,7 @@ def idb4(W, MAX_LAYER = -1):
     return W
 
 
-def layer_to_inplace(old):
+def layer_to_interlace(old):
     T = len(old)
     new = np.zeros(T)
     step = 2
@@ -167,7 +167,7 @@ def layer_to_inplace(old):
     new[0] = old[0]
     return new
 
-def inplace_to_layer(old):
+def interlace_to_layer(old):
     T = len(old)
     new = np.zeros(T)
     step = 2
@@ -181,15 +181,49 @@ def inplace_to_layer(old):
     new[0] = old[0]
     return new
 
-s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
-#s = np.arange(8, dtype = np.float64)
-#s = np.array([9.0, 7.0, 3.0, 5.0])
-#s = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
-#s = np.array([1.0, 3.0, -2.0, 1.5, -0.5, 2.0, 0.0, 1.0])
-ml = -1
-print s
-ds = db4(np.copy(s), MAX_LAYER = ml)
-print ds
-print inplace_to_layer(ds)
-ids = idb4(np.copy(ds), MAX_LAYER = ml)
-print ids
+def waveletprint(W, MAX_LAYER = -1):
+    N = len(W)
+    logn = (N).bit_length() - 1
+    
+    initstep = N
+    if logn > MAX_LAYER >= 0:
+        initstep  >>= (logn - MAX_LAYER)
+        
+    step = initstep
+    scale = 0
+    print initstep
+
+    lowdone = False
+    if step == 1:
+        print "\nScale 2^0:", W
+        
+    while step > 1:
+        #stuff
+        if step==initstep and not lowdone:
+            start = 0
+            lowdone = True
+            sl = W[::step]
+        else:
+            start = step >> 1
+            sl = W[start::step]
+            step >>= 1
+
+        st = "\nScale 2^-" + str(scale) + ":"
+        print st, sl
+        scale += 1
+
+if __name__ == "__main__":
+    s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
+    #s = np.arange(8, dtype = np.float64)
+    #s = np.array([9.0, 7.0, 3.0, 5.0])
+    #s = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
+    #s = np.array([1.0, 3.0, -2.0, 1.5, -0.5, 2.0, 0.0, 1.0])
+    ml = -1
+    #print s
+    ds = db2(np.copy(s), MAX_LAYER = ml)
+    #print ds
+    #print interlace_to_layer(ds)
+    ids = idb2(np.copy(ds), MAX_LAYER = ml)
+    #print ids
+
+waveletprint(ds, MAX_LAYER = ml)
