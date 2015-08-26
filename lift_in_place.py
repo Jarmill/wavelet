@@ -1,6 +1,8 @@
 import pdb
 import numpy as np
 
+
+# --- wavelet transforms ---
 def db2(S, MAX_LAYER = -1):
     #forward discrete wavelet transform db2 (1 vanishing moment)
     #S: array full of data
@@ -152,7 +154,27 @@ def idb4(W, MAX_LAYER = -1):
             
     return W
 
+def dwt(S, MAX_LAYER = -1, wavelet = "db4"):
+    if wavelet == "db2" or wavelet == "haar":
+        return db2(S,  MAX_LAYER = MAX_LAYER)
+    elif wavelet == "db4":
+        return db4(S, MAX_LAYER = MAX_LAYER)
+    #elif wavelet == "db6":
+    #    return db6(S, MAX_LAYER = MAX_LAYER)
+    else:
+        return db4(S, MAX_LAYER = MAX_LAYER)
+    
+def idwt(W, MAX_LAYER = -1, wavelet = "db4"):
+    if wavelet == "db2" or wavelet == "haar":
+        return idb2(W,  MAX_LAYER = MAX_LAYER)
+    elif wavelet == "db4":
+        return idb4(W, MAX_LAYER = MAX_LAYER)
+    #elif wavelet == "db6":
+    #    return idb6(W, MAX_LAYER = MAX_LAYER)
+    else:
+        return idb4(W, MAX_LAYER = MAX_LAYER)   
 
+# --- coefficient ordering ---
 def layer_to_interlace(old):
     T = len(old)
     new = np.zeros(T)
@@ -181,6 +203,7 @@ def interlace_to_layer(old):
     new[0] = old[0]
     return new
 
+# --- printing and plotting ---
 def waveletprint(W, MAX_LAYER = -1):
     N = len(W)
     logn = (N).bit_length() - 1
@@ -212,18 +235,58 @@ def waveletprint(W, MAX_LAYER = -1):
         print st, sl
         scale += 1
 
+
+# --- test functions ---
+def doppler(t):
+    return np.sqrt(t*(t+1)) * np.sin(2*math.pi*1.05/(t+0.05))
+
+def sinusoid(t):
+    return np.sin(2 * np.pi * 4 * t)
+
+def blocks(t):
+    K = lambda c: (1 + np.sign(c))/2.0
+    x = np.array([[.1, .13, .15, .23, .25, .4, .44, .65, .76, .78, .81]]).T
+    h = np.array([[4, -5, 3, -4, 5, -4.2, 2.1, 4.3, -3.1, 2.1, -4.2]]).T
+    return np.sum(h*K(t/2 - x), axis=0)
+    
+def bumps(t):
+    K = lambda c : (1. + np.abs(c)) ** -4.
+    x = np.array([[.1, .13, .15, .23, .25, .4, .44, .65, .76, .78, .81]]).T
+    h = np.array([[4, 5, 3, 4, 5, 4.2, 2.1, 4.3, 3.1, 2.1, 4.2]]).T
+    w = np.array([[.005, .005, .006, .01, .01, .03, .01, .01, .005, .008, .005]]).T
+    return np.sum(h*K((x-t/2)/w), axis=0)    
+    
+def heavisine(t):
+    return 4 * np.sin(2*np.pi*t) - np.sign(t/2 - 0.3) - np.sign(0.72 - t/2)
+
+
+# --- plots and accuracy ---
+def psnr(truth, estimate):
+    #returns Peak Signal to Noise Ratio in decibels
+    N = len(truth)
+    mean = np.mean(truth)
+    #num = sum([abs(truth[i] - mean)**2 for i in range(N)])
+    num = np.sum(truth ** 2)
+    denom = np.sum((truth-estimate)**2)
+    snr = 10 * np.log10(num/denom)
+    
+    return snr
+
 if __name__ == "__main__":
-    s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
+    #s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
     #s = np.arange(8, dtype = np.float64)
     #s = np.array([9.0, 7.0, 3.0, 5.0])
     #s = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
     #s = np.array([1.0, 3.0, -2.0, 1.5, -0.5, 2.0, 0.0, 1.0])
+    N = 128
+    x = np.linspace(0, 2, N)
+    s = blocks(x)
     ml = -1
-    #print s
-    ds = db2(np.copy(s), MAX_LAYER = ml)
+    print s
+    ds = dwt(np.copy(s), MAX_LAYER = ml, wavelet = "db2")
     #print ds
     #print interlace_to_layer(ds)
-    ids = idb2(np.copy(ds), MAX_LAYER = ml)
+    ids = idwt(np.copy(ds), MAX_LAYER = ml, wavelet = "db2")
     #print ids
 
 waveletprint(ds, MAX_LAYER = ml)
