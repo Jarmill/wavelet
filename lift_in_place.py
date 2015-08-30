@@ -1,5 +1,6 @@
 import pdb
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 # --- wavelet transforms ---
@@ -128,7 +129,6 @@ def idb4(W, MAX_LAYER = -1):
     layers = 0
     step = N
     
-    #magic
     #if a max number of layers is specified, lower step so the high freq are processed
     if (((N).bit_length() - 1) >= MAX_LAYER >= 0): step = 1 << MAX_LAYER
     
@@ -203,6 +203,130 @@ def interlace_to_layer(old):
     new[0] = old[0]
     return new
 
+# --- thresholding and denoising ---
+def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", policy = "none"):
+    #W: array full of wavelet coefficients
+    #Possible flags, choice between:
+    #   LAM: set threshold value
+    #   MAX_LAYER: how many layers in transform
+    #   N_ELEMENTS: preserve number of wavelet coefficients
+    #   SHRINK: "hard", "soft", "semisoft"
+    #   POLICY: none, universal, SURE
+    
+    #if THRESHOLD is an integer, THRESHOLD is applied on every level
+    #if it is an array, then THRESHOLD is level dependent
+    
+    #Warning: Horrible code. Need to completely rehaul.
+    
+    shrink = shrink.lower()
+    policy = policy.lower()
+    N = len(W)
+    logN = (N).bit_length() - 1
+    
+    shrinkage = False
+    
+    if LAM > 0:
+        THRESHOLD = LAM
+    
+    elif policy != "none":
+        
+        start = 1
+        step = 2
+        
+        if policy == "universal":
+            #universal thresholding is the upper bound
+            #doesnt matter whether hard, soft, or semisoft are used
+            median = np.median(abs(W[start:step]))
+            THRESHOLD = median/0.6745*np.sqrt(2.0*(logN-1))
+
+        """
+        elif policy == "universal_level" and MAX_LAYER > 0:
+            layer = 0
+            THRESHOLD = []
+            while layer < MAX_LAYER-1 and i > 0:
+                lni = (i).bit_length() - 1
+                median = np.median(abs(W[i:j]))
+                THRESHOLD.append(median/0.6745*np.sqrt(2.0*lni))
+                i >>= 1
+                j >>= 1
+        """
+
+        """        
+        elif policy == "sure" and MAX_LAYER > 0:
+            #sure stuff goes here
+            #requires soft thresholding
+            THRESHOLD = []
+            shrink = "soft"
+            layer = 0
+            while layer < MAX_LAYER-1 and i > 0:
+                #pdb.set_trace()
+                w_target = W[i:j]
+                sigma = np.median(np.abs(w_target))/0.6745
+                s = lambda t: sure(w_target, t, sigma)
+                lni = np.log(i)
+                t0 = sigma*np.sqrt(2.0*lni)
+                #threshold minimizes SURE
+                #start with universal/2
+                t = opt.minimize(fun = s, x0 = t0/2, bounds = [[0, t0]])
+                nu = sure_sparsity(w_target)
+                if nu <= 1: t = t0
+                THRESHOLD.append(t)
+                i >>= 1
+                j >>= 1
+        """
+                        
+        #elif policy == "neighcoeff" and MAX_LAYER > 0:
+        #    while layer < MAX_LAYER - 1 and i > 0:
+        #        pass
+                                
+        
+    elif N_ELEMENTS > 0:
+        #THRESHOLD = sorted([abs(i) for i in W], reverse=True)[N_ELEMENTS]
+        THRESHOLD = np.abs(W[np.argpartition(-np.abs(W), N_ELEMENTS)[N_ELEMENTS]])
+        
+        shrink = "hard"
+        
+        
+    else:
+        return W
+    
+    
+    if type(THRESHOLD) != list and type(THRESHOLD) != np.ndarray:
+       # print "Constant Threshold:", THRESHOLD
+        W[np.abs(W) < THRESHOLD] = 0.0
+        if shrink == "soft":
+            W[np.abs(W) >= THRESHOLD] -= THRESHOLD * np.sign(W[np.abs(W) >= THRESHOLD])
+           # print "soft threshold"
+        
+        elif shrink == "semisoft":
+            W[np.abs(W) >= THRESHOLD] = np.sqrt(W[np.abs(W) >= THRESHOLD]**2 - THRESHOLD**2) * np.sign(W[np.abs(W) >= THRESHOLD])
+
+    """    
+    elif type(THRESHOLD) == list:
+        #TODO
+        i = N/2
+        j = N
+        c = 0
+        if MAX_LAYER < 0: MAX_LAYER = logN
+        while c < MAX_LAYER and c < len(THRESHOLD) and i > 0:
+            #repeated indexing is compiler optimized away
+            t = THRESHOLD[c]
+            #print t
+            W[i:j][np.abs(W[i:j]) < t] = 0.0
+            if shrink == "soft":
+                W[i:j][abs(W[i:j]) >= t] -= t * np.sign(W[i:j][abs(W[i:j]) >= t])
+                #print "soft threshold"
+        
+            elif shrink == "semisoft":
+                W[i:j][abs(W[i:j]) >= t] = np.sqrt(W[i:j][abs(W[i:j]) >= t]**2 - t**2) * np.sign(W[i:j][abs(W[i:j]) >= t])
+
+            i >>= 1
+            j >>= 1
+            
+            c += 1
+    """
+    return W
+    
 # --- printing and plotting ---
 def waveletprint(W, MAX_LAYER = -1):
     N = len(W)
@@ -238,7 +362,7 @@ def waveletprint(W, MAX_LAYER = -1):
 
 # --- test functions ---
 def doppler(t):
-    return np.sqrt(t*(t+1)) * np.sin(2*math.pi*1.05/(t+0.05))
+    return np.sqrt(t*(t+1)) * np.sin(2*np.pi*1.05/(t+0.05))
 
 def sinusoid(t):
     return np.sin(2 * np.pi * 4 * t)
@@ -272,21 +396,143 @@ def psnr(truth, estimate):
     
     return snr
 
+def approx_plot(t, W, MAX_LAYER = -1, wavelet = "db4"):
+    #sequence of approximations plotted, each with 1/2 as much data as the previous
+    N = len(W)
+    logN = (N).bit_length() - 1
+    
+    #if a max number of layers is specified, lower step so the high freq are processed
+    if (logN >= MAX_LAYER >= 0):
+        step = 1 << MAX_LAYER
+    else:
+        step = N
+        MAX_LAYER = logN
+
+
+    if wavelet == "db2" or wavelet == "haar":
+        factor = 1
+    elif wavelet == "db4":
+        factor = 1/np.sqrt(2)
+        
+    curr_factor = 1.0
+    step = 1
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    
+    for level in range(MAX_LAYER, 0, -1):
+        #use approximation
+        ids = idwt(np.copy(W[::step]), level, wavelet)
+        ids *= curr_factor
+        ts = t[step/2::step]
+        name = "truth" if level == MAX_LAYER else "level" + str(level)
+        ax.plot(ts, ids, label = name)
+        
+        curr_factor *= factor
+        step <<= 1
+ 
+    ax.legend(loc = "lower right")
+    return fig
+
+
+def coeff_pyramid(t, W, MAX_LAYER = -1, wavelet = "db4"):
+    #2 plots, a coefficient stem plot, and a plot showing the bases (inverse of each layer of coefficients)
+    N = len(W)
+    logN = (N).bit_length() - 1
+    
+    #if a max number of layers is specified, lower step so the high freq are processed
+    if (logN >= MAX_LAYER >= 0):
+        step = 1 << MAX_LAYER
+    else:
+        step = N
+        MAX_LAYER = logN
+    
+    fig, axs = plt.subplots(MAX_LAYER+1, 1, sharex = True)
+    fig2, axs2 = plt.subplots(MAX_LAYER+1, 1, sharex = True, sharey = True)
+    i = 0
+    
+    T = N >> (MAX_LAYER)
+    Fs = 1 / (t[1]-t[0])
+    
+    currplot = 0
+    max_freq = Fs / (1 << (MAX_LAYER - 1))
+    
+    while step > 1:
+        start = step >> 1
+        layer_t = t[start::step]
+        
+        w_empty = np.zeros(N)
+        
+        if i == 0:
+            title_str = "Scaling Coeff (0 - {:.2f} Hz)".format(Fs /(1 << (MAX_LAYER - 1)))
+            layer_w = W[::step]
+            axs[i].set_title(title_str)
+            axs2[i].set_title(title_str)
+            w_empty[::step] = W[::step]
+        
+        else:
+            title_str = "Wavelet Coeff level {:x} ({:.2f} - {:.2f} Hz)".format(i-1, max_freq, max_freq*2)
+            axs[i].set_title(title_str)
+            axs2[i].set_title(title_str)
+            
+            max_freq *= 2
+            layer_w = W[start::step]
+            w_empty[start::step] = W[start::step]
+            
+            step >>= 1
+            
+        #pdb.set_trace()
+        
+        axs[i].stem(layer_t, layer_w, basefmt = "black", markerfmt = " ")
+        idw = idwt(np.copy(w_empty), MAX_LAYER, wavelet)
+        axs2[i].plot(t, idw)
+
+        i += 1
+        
+    return fig 
+
 if __name__ == "__main__":
     #s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
     #s = np.arange(8, dtype = np.float64)
     #s = np.array([9.0, 7.0, 3.0, 5.0])
     #s = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
     #s = np.array([1.0, 3.0, -2.0, 1.5, -0.5, 2.0, 0.0, 1.0])
-    N = 128
+    N = 1024
     x = np.linspace(0, 2, N)
-    s = blocks(x)
-    ml = -1
-    print s
-    ds = dwt(np.copy(s), MAX_LAYER = ml, wavelet = "db2")
+    sigma = 0.35
+    noise = np.random.normal(loc = 0.0, scale = sigma, size = N)
+    s = heavisine(x)
+    rs = s + noise
+    ml = 7
+    wavelet_type = "db4"
+    #print s
+    ds = dwt(np.copy(s), MAX_LAYER = ml, wavelet = wavelet_type)
+    drs = dwt(np.copy(rs), MAX_LAYER = ml, wavelet = wavelet_type)
     #print ds
     #print interlace_to_layer(ds)
-    ids = idwt(np.copy(ds), MAX_LAYER = ml, wavelet = "db2")
+    ids = idwt(np.copy(ds), MAX_LAYER = ml, wavelet = wavelet_type)
     #print ids
 
-waveletprint(ds, MAX_LAYER = ml)
+    #waveletprint(ds, MAX_LAYER = ml)
+    #coeff_pyramid(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
+    #approx_plot(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
+
+
+    drst = threshold(drs, policy = "universal")
+    
+    #coeff_pyramid(x, ds2, MAX_LAYER = ml, wavelet = wavelet_type)
+    #approx_plot(x, ds2, MAX_LAYER = ml, wavelet = wavelet_type)
+
+    idrst = idwt(np.copy(drst), MAX_LAYER = ml, wavelet = wavelet_type)
+    psnrt = psnr(s, ids)
+    psnr1 = psnr(s, rs)
+    psnr2 = psnr(s, idrst)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.plot(x, s, label = "Ground Truth ({:.2f} dB)".format(psnrt))
+    ax.plot(x, rs, label = "Noisy Data ({:.2f} dB)".format(psnr1))
+    ax.plot(x, idrst, label = "Univ Threshold ({:.2f} dB)".format(psnr2))
+    ax.legend(loc = "lower right")
+
+    plt.show()
+    
