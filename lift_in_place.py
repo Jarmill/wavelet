@@ -237,19 +237,24 @@ def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", pol
             #universal thresholding is the upper bound
             #doesnt matter whether hard, soft, or semisoft are used
             median = np.median(abs(W[start:step]))
-            THRESHOLD = median/0.6745*np.sqrt(2.0*(logN-1))
+            THRESHOLD = np.abs(median/0.6745*np.sqrt(2.0*(logN-1)))
 
-        """
+
         elif policy == "universal_level" and MAX_LAYER > 0:
             layer = 0
             THRESHOLD = []
-            while layer < MAX_LAYER-1 and i > 0:
-                lni = (i).bit_length() - 1
-                median = np.median(abs(W[i:j]))
-                THRESHOLD.append(median/0.6745*np.sqrt(2.0*lni))
-                i >>= 1
-                j >>= 1
-        """
+            stepmax = step << MAX_LAYER
+            currN = N >> 1
+            while step < stepmax:
+                log_currN = (currN).bit_length() - 1
+                median = np.median(np.abs(W[start::step]))
+                thresh = np.abs(median/0.6745 * np.sqrt(2 * log_currN))
+                THRESHOLD.append(thresh)
+
+                start <<= 1
+                step  <<= 1
+                currN >>= 1
+                
 
         """        
         elif policy == "sure" and MAX_LAYER > 0:
@@ -301,30 +306,33 @@ def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", pol
         elif shrink == "semisoft":
             W[np.abs(W) >= THRESHOLD] = np.sqrt(W[np.abs(W) >= THRESHOLD]**2 - THRESHOLD**2) * np.sign(W[np.abs(W) >= THRESHOLD])
 
-    """    
+
     elif type(THRESHOLD) == list:
-        #TODO
-        i = N/2
-        j = N
-        c = 0
+        #level dependent thresholding is done from the highest frequency to the lowest frequency
+        
+        start = 1
+        step  = 2
+
         if MAX_LAYER < 0: MAX_LAYER = logN
-        while c < MAX_LAYER and c < len(THRESHOLD) and i > 0:
-            #repeated indexing is compiler optimized away
-            t = THRESHOLD[c]
-            #print t
-            W[i:j][np.abs(W[i:j]) < t] = 0.0
+        i = 0
+
+        while i < MAX_LAYER:
+            t = THRESHOLD[i]
+
+            W[start::step][np.abs(W[start::step]) < t] = 0.0
+
             if shrink == "soft":
-                W[i:j][abs(W[i:j]) >= t] -= t * np.sign(W[i:j][abs(W[i:j]) >= t])
+                W[start::step][np.abs(W[start::step]) >= t] -= t * np.sign(W[start::step][abs(W[start::step]) >= t])
                 #print "soft threshold"
         
             elif shrink == "semisoft":
-                W[i:j][abs(W[i:j]) >= t] = np.sqrt(W[i:j][abs(W[i:j]) >= t]**2 - t**2) * np.sign(W[i:j][abs(W[i:j]) >= t])
+                W[start::step][abs(W[start::step]) >= t] = np.sqrt(W[start::step][abs(W[start::step]) >= t]**2 - t**2) * np.sign(W[start::step][abs(W[start::step]) >= t])
 
-            i >>= 1
-            j >>= 1
-            
-            c += 1
-    """
+
+            i += 1
+            start <<= 1
+            step  <<= 1
+        
     return W
     
 # --- printing and plotting ---
@@ -515,11 +523,11 @@ if __name__ == "__main__":
     #waveletprint(ds, MAX_LAYER = ml)
     #coeff_pyramid(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
     #approx_plot(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
+    coeff_pyramid(x, drs, MAX_LAYER = ml, wavelet = wavelet_type)
 
-
+    #drst = threshold(drs, policy = "universal_level", MAX_LAYER = 3)
     drst = threshold(drs, policy = "universal")
-    
-    #coeff_pyramid(x, ds2, MAX_LAYER = ml, wavelet = wavelet_type)
+    coeff_pyramid(x, drst, MAX_LAYER = ml, wavelet = wavelet_type)
     #approx_plot(x, ds2, MAX_LAYER = ml, wavelet = wavelet_type)
 
     idrst = idwt(np.copy(drst), MAX_LAYER = ml, wavelet = wavelet_type)
