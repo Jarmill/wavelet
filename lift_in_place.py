@@ -236,8 +236,9 @@ def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", pol
         if policy == "universal":
             #universal thresholding is the upper bound
             #doesnt matter whether hard, soft, or semisoft are used
-            median = np.median(abs(W[start:step]))
-            THRESHOLD = np.abs(median/0.6745*np.sqrt(2.0*(logN-1)))
+            median = np.median(np.abs(W))
+            lnN = np.log(N)
+            THRESHOLD = np.abs(median/0.6745*np.sqrt(2.0*lnN))
 
 
         elif policy == "universal_level" and MAX_LAYER > 0:
@@ -246,15 +247,46 @@ def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", pol
             stepmax = step << MAX_LAYER
             currN = N >> 1
             while step < stepmax:
-                log_currN = (currN).bit_length() - 1
+                ln_currN = np.log(currN)
                 median = np.median(np.abs(W[start::step]))
-                thresh = np.abs(median/0.6745 * np.sqrt(2 * log_currN))
+                thresh = np.abs(median/0.6745 * np.sqrt(2 * ln_currN))
                 THRESHOLD.append(thresh)
 
                 start <<= 1
                 step  <<= 1
                 currN >>= 1
                 
+                        
+        elif policy == "neighcoeff" and MAX_LAYER > 0:
+            stepmax = step << MAX_LAYER
+            currN = N >> 1
+            L = 3
+            THRESHOLD = "Neighcoeff Override!"
+            while step < stepmax:
+                lam = 2/3.0 * np.log(currN)
+                #use median absolute deviation
+
+                #WARNING
+                #BAD CODE HERE
+                roller = np.empty((currN, 3))
+                roller[:, 0] = np.roll(W[start::step], -1)
+                roller[:, 1] = W[start::step]
+                roller[:, 2] = np.roll(W[start::step], 1)
+
+                s2 = np.sum(roller**2, axis = 1)
+
+                sigma = np.median(np.abs(roller), axis = 1)/0.6745
+                #sigma = np.median(np.abs(np.diff(tw) - np.median(np.diff(tw)))) / np.sqrt(2) / 0.6745
+
+                beta = 1 - lam * L * sigma**2 / s2
+                beta[beta < 0] = 0
+
+                W[start::step] *= beta
+                
+                start <<= 1
+                step  <<= 1
+                currN >>= 1
+                                
 
         """        
         elif policy == "sure" and MAX_LAYER > 0:
@@ -279,11 +311,6 @@ def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", pol
                 i >>= 1
                 j >>= 1
         """
-                        
-        #elif policy == "neighcoeff" and MAX_LAYER > 0:
-        #    while layer < MAX_LAYER - 1 and i > 0:
-        #        pass
-                                
         
     elif N_ELEMENTS > 0:
         #THRESHOLD = sorted([abs(i) for i in W], reverse=True)[N_ELEMENTS]
@@ -332,6 +359,9 @@ def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", pol
             i += 1
             start <<= 1
             step  <<= 1
+
+    else:
+        print THRESHOLD
         
     return W
     
@@ -523,23 +553,36 @@ if __name__ == "__main__":
     #waveletprint(ds, MAX_LAYER = ml)
     #coeff_pyramid(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
     #approx_plot(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
-    coeff_pyramid(x, drs, MAX_LAYER = ml, wavelet = wavelet_type)
 
-    #drst = threshold(drs, policy = "universal_level", MAX_LAYER = 3)
-    drst = threshold(drs, policy = "universal")
-    coeff_pyramid(x, drst, MAX_LAYER = ml, wavelet = wavelet_type)
+    #coeff_pyramid(x, drs, MAX_LAYER = ml, wavelet = wavelet_type)
+
+    coeff_univ_level = threshold(np.copy(drs), policy = "universal_level", MAX_LAYER = 4)
+    coeff_univ = threshold(np.copy(drs), policy = "universal")
+    coeff_neighcoeff = threshold(np.copy(drs), policy = "neighcoeff", MAX_LAYER = 4)
+    #coeff_pyramid(x, drst, MAX_LAYER = ml, wavelet = wavelet_type)
     #approx_plot(x, ds2, MAX_LAYER = ml, wavelet = wavelet_type)
 
-    idrst = idwt(np.copy(drst), MAX_LAYER = ml, wavelet = wavelet_type)
-    psnrt = psnr(s, ids)
-    psnr1 = psnr(s, rs)
-    psnr2 = psnr(s, idrst)
+    univ_level = idwt(np.copy(coeff_univ_level), MAX_LAYER = ml, wavelet = wavelet_type)
+    univ = idwt(np.copy(coeff_univ), MAX_LAYER = ml, wavelet = wavelet_type)
+    neighcoeff = idwt(np.copy(coeff_neighcoeff), MAX_LAYER = ml, wavelet = wavelet_type)
+    psnr_truth = psnr(s, ids)
+    print "True PSNR:\t", psnr_truth
+    psnr_noise = psnr(s, rs)
+    print "Random PSNR:\t", psnr_noise
+    psnr_univ = psnr(s, univ)
+    print "Universal PSNR:\t", psnr_univ
+    psnr_univ_level = psnr(s, univ_level)
+    print "UnivLevel PSNR:\t", psnr_univ_level
+    psnr_neighcoeff = psnr(s, neighcoeff)
+    print "Neighcoeff PSNR:\t", psnr_neighcoeff
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    ax.plot(x, s, label = "Ground Truth ({:.2f} dB)".format(psnrt))
-    ax.plot(x, rs, label = "Noisy Data ({:.2f} dB)".format(psnr1))
-    ax.plot(x, idrst, label = "Univ Threshold ({:.2f} dB)".format(psnr2))
+    ax.plot(x, s, label = "Ground Truth ({:.2f} dB)".format(psnr_truth))
+    ax.plot(x, rs, label = "Noisy Data ({:.2f} dB)".format(psnr_noise))
+    ax.plot(x, univ, label = "Univ Threshold ({:.2f} dB)".format(psnr_univ))
+    ax.plot(x, univ_level, label = "Univ Level Threshold ({:.2f} dB)".format(psnr_univ_level))
+    ax.plot(x, neighcoeff, label = "Neighcoeff Threshold ({:.2f} dB)".format(psnr_neighcoeff))
     ax.legend(loc = "lower right")
 
     plt.show()
