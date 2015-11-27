@@ -160,7 +160,6 @@ def db6(S, MAX_LAYER = -1):
     #S: array full of data
     #T: number of elements evaluated
 
-    #split array, first half are even elements and second half are odd element
     N = len(S)
     T = N
 
@@ -295,6 +294,131 @@ def idb6(W, MAX_LAYER = -1):
 
     return W
 
+def cdf97(S, MAX_LAYER = -1):
+    """CDF9/7 forward transformation, used for JPEG2000"""
+
+    N = len(S)
+    T = N
+
+    #if N is not a power of 2
+    if N & (N-1) != 0 and N > 0:
+        #find lowest power of 2 greater than N
+        p2 = 1 << (N).bit_length()
+        #pad with zeros up to N        S.resize(p2, refcheck=False)
+        print S
+        T = p2
+
+    #coefficients
+    alpha = -1.586134342
+    beta = -0.05298011854
+    gamma = 0.8829110762
+    delta = 0.4435068522
+    zeta = 1.149604398
+
+    layers = 0
+    step = 2
+
+    while step < 2*T:
+        if (MAX_LAYER >= 0) and (layers >= MAX_LAYER): break
+
+        start = step/2
+
+        #update 1
+        #u1(z) = alpha(1 + z^-1)
+        #odd[n] += alpha * (even[n] + even[n+1])
+        S[start:-start:step]  += alpha * (S[:-step:step] + S[step::step])
+        S[-start] += alpha * (S[-step] + S[0])
+
+        #predict 1
+        #p1(z) = beta(1 + z)
+        #even[n] += beta * (odd[n] + odd[n-1])
+
+        S[step::step] += beta * (S[step+start::step] + S[start:-start:step])
+        S[0] += beta * (S[start] + S[-start])
+
+        #update 2
+        #u2(z) = gamma*(1 + z^-1)
+        #odd[n] += gamma * (even[n] + even[n+1]
+
+        S[start:-start:step] += gamma * (S[step::step] + S[:-step:step])
+        S[-start] += gamma * (S[-step] +  S[0])
+
+        #predict 2
+        #p2(z) = delta * (1 + z)
+        #even[n] += delta * (odd[n] + odd[n-1])
+        S[step::step] += delta * (S[start+step::step] + S[start:-start:step])
+        S[0] += delta * (S[start] + S[-start])
+
+        #normalize
+        #even[n] *= zeta
+        #odd[n]  *= 1/zeta
+        S[::step]  *= zeta
+        S[start::step] *= 1/zeta
+
+        step <<= 1
+        layers += 1
+
+    return S
+
+def icdf97(W, MAX_LAYER = -1):
+    """CDF9/7 inverse transformation, used for JPEG2000"""
+    #coefficients
+    alpha = -1.586134342
+    beta = -0.05298011854
+    gamma = 0.8829110762
+    delta = 0.4435068522
+    zeta = 1.149604398
+
+    layers = 0
+    N = len(W)
+    step = N
+
+
+    #if a max number of layers is specified, lower step so the high freq are processed
+    if (((N).bit_length() - 1) >= MAX_LAYER >= 0): step = 1 << MAX_LAYER
+
+    while step > 1:
+        start = step/2
+
+        #normalize'
+        #even[n] *= 1/zeta
+        #odd[n]  *= zeta
+        W[::step]  *= 1/zeta
+        W[start::step] *= zeta
+
+
+        #predict 2'
+        #p2(z) = delta * (1 + z)
+        #even[n] -= delta * (odd[n] + odd[n-1])
+        W[step::step] -= delta * (W[start+step::step] + W[start:-start:step])
+        W[0] -= delta * (W[start] + W[-start])
+
+        #update 2'
+        #u2(z) = gamma*(1 + z^-1)
+        #odd[n] -= gamma * (even[n] + even[n+1]
+
+        W[start:-start:step] -= gamma * (W[step::step] + W[:-step:step])
+        W[-start] -= gamma * (W[-step] +  W[0])
+
+        #predict 1'
+        #p1(z) = beta(1 + z)
+        #even[n] -= beta * (odd[n] + odd[n-1])
+
+        W[step::step] -= beta * (W[step+start::step] + W[start:-start:step])
+        W[0] -= beta * (W[start] + W[-start])
+
+        #update 1
+        #u1(z) = alpha(1 + z^-1)
+        #odd[n] -= alpha * (even[n] + even[n+1])
+        W[start:-start:step]  -= alpha * (W[:-step:step] + W[step::step])
+        W[-start] -= alpha * (W[-step] + W[0])
+
+        step >>= 1
+
+    return W
+
+
+
 def dwt(S, MAX_LAYER = -1, wavelet = "db4"):
     """wrapper for forward discrete wavelet transform"""
     if wavelet == "db2" or wavelet == "haar":
@@ -303,6 +427,8 @@ def dwt(S, MAX_LAYER = -1, wavelet = "db4"):
         return db4(S, MAX_LAYER = MAX_LAYER)
     elif wavelet == "db6":
         return db6(S, MAX_LAYER = MAX_LAYER)
+    elif wavelet == "cdf97":
+        return cdf97(S, MAX_LAYER = MAX_LAYER)
     else:
         return db4(S, MAX_LAYER = MAX_LAYER)
 
@@ -314,6 +440,8 @@ def idwt(W, MAX_LAYER = -1, wavelet = "db4"):
         return idb4(W, MAX_LAYER = MAX_LAYER)
     elif wavelet == "db6":
         return idb6(W, MAX_LAYER = MAX_LAYER)
+    elif wavelet == "icdf97":
+        return icdf97(W, MAX_LAYER = MAX_LAYER)
     else:
         return idb4(W, MAX_LAYER = MAX_LAYER)
 
@@ -594,18 +722,31 @@ def approx_plot(t, W, MAX_LAYER = -1, wavelet = "db4"):
         factor = 1
     elif wavelet == "db4":
         factor = 1/np.sqrt(2)
+        #factor = (np.sqrt(3)-1)/np.sqrt(2)
+        #factor = 0.1895161126191866
+        #factor = 1
     elif wavelet == "db6":
-        factor = 1/1.9182029462
+        #factor = 1/np.sqrt(1.9182029462)
+        factor = 1/np.sqrt(2)
+        #factor = 1/np.sqrt(4)
+        #factor = 0.22360679774997896*0.958419749158*0.984681346069
+        #factor = 1/1.9182029462
+    elif wavelet == "cdf97":
+        factor = 1/np.sqrt(2)
 
     curr_factor = 1.0
     step = 1
     fig = plt.figure()
     ax = fig.add_subplot(111)
 
+    prev = 1
+    
     for level in range(MAX_LAYER, 0, -1):
         #use approximation
         ids = idwt(np.copy(W[::step]), level, wavelet)
         ids *= curr_factor
+        #print level, np.max(ids), prev/np.max(ids)
+        prev = np.max(ids)
         ts = t[step/2::step]
         name = "truth" if level == MAX_LAYER else "level" + str(level)
         ax.plot(ts, ids, label = name)
@@ -614,6 +755,7 @@ def approx_plot(t, W, MAX_LAYER = -1, wavelet = "db4"):
         step <<= 1
 
     ax.legend(loc = "lower right")
+    ax.set_title("Approximation")
     return fig
 
 
@@ -663,8 +805,6 @@ def coeff_pyramid(t, W, MAX_LAYER = -1, wavelet = "db4"):
 
             step >>= 1
 
-        #pdb.set_trace()
-
         axs[i].stem(layer_t, layer_w, basefmt = "black", markerfmt = " ")
         idw = idwt(np.copy(w_empty), MAX_LAYER, wavelet)
         axs2[i].plot(t, idw)
@@ -674,19 +814,31 @@ def coeff_pyramid(t, W, MAX_LAYER = -1, wavelet = "db4"):
     return fig
 
 if __name__ == "__main__":
-    #s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
+    s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
     #s = np.arange(8, dtype = np.float64)
     #s = np.array([9.0, 7.0, 3.0, 5.0])
     #s = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
     #s = np.array([1.0, 3.0, -2.0, 1.5, -0.5, 2.0, 0.0, 1.0])
-    N = 1024
+    N = 256
+
+    """
+    #testing cdf97
+    ml = -1
+    print s
+    ds = cdf97(np.copy(s), MAX_LAYER = ml)
+    waveletprint(ds, MAX_LAYER = ml)
+    ids = icdf97(np.copy(ds), MAX_LAYER = ml)
+    print ids
+    """
+    
     x = np.linspace(0, 2, N)
-    sigma = 0.35
+    sigma = 0.30
     noise = np.random.normal(loc = 0.0, scale = sigma, size = N)
     s = heavisine(x)
     rs = s + noise
-    ml = 7
-    wavelet_type = "db6"
+    ml = -1
+    #wavelet_type = "db4"
+    wavelet_type = "cdf97"
     #print s
     ds = dwt(np.copy(s), MAX_LAYER = ml, wavelet = wavelet_type)
     drs = dwt(np.copy(rs), MAX_LAYER = ml, wavelet = wavelet_type)
@@ -696,10 +848,11 @@ if __name__ == "__main__":
     #print ids
 
     #waveletprint(ds, MAX_LAYER = ml)
-    coeff_pyramid(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
+    #coeff_pyramid(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
     approx_plot(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
+    
+    
     """
-
     #coeff_pyramid(x, drs, MAX_LAYER = ml, wavelet = wavelet_type)
 
     coeff_univ_level = threshold(np.copy(drs), policy = "universal_level", MAX_LAYER = 4)
@@ -724,13 +877,14 @@ if __name__ == "__main__":
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
+    ax.set_title(r"Denoising (AWGN, $\sigma$={:.2f})".format(sigma))
     ax.plot(x, s, label = "Ground Truth ({:.2f} dB)".format(psnr_truth))
     ax.plot(x, rs, label = "Noisy Data ({:.2f} dB)".format(psnr_noise))
     ax.plot(x, univ, label = "Univ Threshold ({:.2f} dB)".format(psnr_univ))
     ax.plot(x, univ_level, label = "Univ Level Threshold ({:.2f} dB)".format(psnr_univ_level))
     ax.plot(x, neighcoeff, label = "Neighcoeff Threshold ({:.2f} dB)".format(psnr_neighcoeff))
     ax.legend(loc = "lower right")
-
     """
+
     plt.show()
     
