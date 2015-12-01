@@ -371,14 +371,12 @@ def icdf97(W, MAX_LAYER = -1):
     kodd = 1/1.1496043988602418
     keven = 1.1496043988602418
     
-    layers = 0
     N = len(W)
     step = N
 
 
     #if a max number of layers is specified, lower step so the high freq are processed
     if (((N).bit_length() - 1) >= MAX_LAYER >= 0): step = 1 << MAX_LAYER
-
     while step > 1:
         start = step/2
         
@@ -420,7 +418,68 @@ def icdf97(W, MAX_LAYER = -1):
 
     return W
 
+def legall53(S, MAX_LAYER = -1):
+    """Legall 5/3 forward transformation, used for JPEG2000"""
 
+    N = len(S)
+    T = N
+
+    #if N is not a power of 2
+    if N & (N-1) != 0 and N > 0:
+        #find lowest power of 2 greater than N
+        p2 = 1 << (N).bit_length()
+        #pad with zeros up to N        S.resize(p2, refcheck=False)
+        T = p2
+
+    layers = 0
+    step = 2
+
+    while step < 2*T:
+        if (MAX_LAYER >= 0) and (layers >= MAX_LAYER): break
+
+        start = step/2
+
+        #update 1
+        #u1(z) = (1 + z^-1)/2
+        S[start:-start:step] -= (S[step::step] + S[:-step:step])/2
+        S[-start] -= (S[-step] + S[0])
+
+        #predict 1
+        #p1(z) = (1 + z)/4
+        S[step::step] += (S[step+start::step] + S[start:-start:step])/4
+        S[0] += (S[start] + S[-start])/4
+
+        step <<= 1
+        layers += 1
+
+    return S
+
+def ilegall53(W, MAX_LAYER = -1):
+    """Legall 5/3 inverse transformation, used for JPEG2000"""    
+    layers = 0
+    N = len(W)
+    step = N
+
+
+    #if a max number of layers is specified, lower step so the high freq are processed
+    if (((N).bit_length() - 1) >= MAX_LAYER >= 0): step = 1 << MAX_LAYER
+
+    while step > 1:
+        start = step/2
+
+        #predict 1'
+        #p1(z) = (1 + z)/4
+        W[step::step] -= (W[step+start::step] + W[start:-start:step])/4
+        W[0] -= (W[start] + W[-start])/4
+
+        #update 1'
+        #u1(z) = (1 + z^-1)/2
+        W[start:-start:step] += (W[step::step] + W[:-step:step])/2
+        W[-start] += (W[-step] + W[0])
+
+        step >>= 1
+
+    return W
 
 def dwt(S, MAX_LAYER = -1, wavelet = "db4"):
     """wrapper for forward discrete wavelet transform"""
@@ -432,6 +491,8 @@ def dwt(S, MAX_LAYER = -1, wavelet = "db4"):
         return db6(S, MAX_LAYER = MAX_LAYER)
     elif wavelet == "cdf97":
         return cdf97(S, MAX_LAYER = MAX_LAYER)
+    elif wavelet == "legall53":
+        return legall53(S, MAX_LAYER = MAX_LAYER)
     else:
         return db4(S, MAX_LAYER = MAX_LAYER)
 
@@ -445,6 +506,8 @@ def idwt(W, MAX_LAYER = -1, wavelet = "db4"):
         return idb6(W, MAX_LAYER = MAX_LAYER)
     elif wavelet == "cdf97":
         return icdf97(W, MAX_LAYER = MAX_LAYER)
+    elif wavelet == "legall53":
+        return ilegall53(W, MAX_LAYER = MAX_LAYER)
     else:
         return idb4(W, MAX_LAYER = MAX_LAYER)
 
@@ -729,6 +792,8 @@ def approx_plot(t, W, MAX_LAYER = -1, wavelet = "db4", f = []):
         factor = 1/np.sqrt(2)
     elif wavelet == "cdf97":
         factor = 1/np.sqrt(2)
+    elif wavelet == "legall53":
+        factor = 1
 
     curr_factor = 1.0
     step = 1
@@ -755,7 +820,7 @@ def approx_plot(t, W, MAX_LAYER = -1, wavelet = "db4", f = []):
         step <<= 1
 
     ax.legend(loc = "lower right")
-    ax.set_title("Approximation")
+    ax.set_title(wavelet + " Approximation")
     return fig
 
 
@@ -771,8 +836,14 @@ def coeff_pyramid(t, W, MAX_LAYER = -1, wavelet = "db4"):
         step = N
         MAX_LAYER = logN
 
+    #wavelet coefficients
     fig, axs = plt.subplots(MAX_LAYER+1, 1, sharex = True)
+    fig.suptitle(wavelet + " wavelet coefficients", fontsize = 20)
+    
+    #basis functions
     fig2, axs2 = plt.subplots(MAX_LAYER+1, 1, sharex = True, sharey = True)
+    fig2.suptitle(wavelet + " wavelet basis functions", fontsize = 20)
+
     i = 0
 
     T = N >> (MAX_LAYER)
@@ -806,25 +877,23 @@ def coeff_pyramid(t, W, MAX_LAYER = -1, wavelet = "db4"):
             step >>= 1
 
         axs[i].stem(layer_t, layer_w, basefmt = "black", markerfmt = " ")
+
+        axs2[i].axhline(y = 0, color = 'k')
         idw = idwt(np.copy(w_empty), MAX_LAYER, wavelet)
         axs2[i].plot(t, idw)
 
+
         i += 1
 
-    return fig
+    return [fig, fig2]
 
 if __name__ == "__main__":
     #s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
-    #s = np.arange(8, dtype = np.float64)
-    #s = np.array([9.0, 7.0, 3.0, 5.0])
-    #s = np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
-    #s = np.array([1.0, 3.0, -2.0, 1.5, -0.5, 2.0, 0.0, 1.0])
     N = 1024
     x = np.linspace(0, 2, N)
     s = doppler(x)
 
     
-    #testing cdf97
     ml = 7
     wv = "cdf97"
     #print s
@@ -833,6 +902,7 @@ if __name__ == "__main__":
     ids = idwt(np.copy(ds), MAX_LAYER = ml, wavelet = wv)
     #print ids
     approx_plot(x, np.copy(ds), MAX_LAYER = ml, wavelet = wv, f = s)
+    coeff_pyramid(x, ds, MAX_LAYER = ml, wavelet = wv)
     
     """
     x = np.linspace(0, 2, N)
