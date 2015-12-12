@@ -442,7 +442,7 @@ def legall53(S, MAX_LAYER = -1):
         #update 1
         #u1(z) = (1 + z^-1)/2
         S[start:-start:step] -= (S[step::step] + S[:-step:step])/2
-        S[-start] -= (S[-step] + S[0])
+        S[-start] -= (S[-step] + S[0])/2
 
         #predict 1
         #p1(z) = (1 + z)/4
@@ -895,7 +895,7 @@ if __name__ == "__main__":
 
     
     ml = 7
-    wv = "cdf97"
+    wv = "legall53"
     #print s
     ds = dwt(np.copy(s), MAX_LAYER = ml, wavelet = wv)
     #waveletprint(ds, MAX_LAYER = ml)
