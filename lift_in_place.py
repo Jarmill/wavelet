@@ -1,7 +1,7 @@
 import pdb
 import numpy as np
 import matplotlib.pyplot as plt
-
+import scipy.optimize as opt
 
 # --- wavelet transforms ---
 def db2(S, MAX_LAYER = -1):
@@ -541,6 +541,28 @@ def interlace_to_layer(old):
     return new
 
 # --- thresholding and denoising ---
+def sure(W, THRESHOLD, sigma):
+    #Stein's Unbiased Risk Estimator
+    #must be minimized
+    risk = 0
+    var = sigma*sigma
+    for x in W:
+        if x <= THRESHOLD:
+            risk += x*x - var
+        else:
+            risk += var + THRESHOLD*THRESHOLD
+    return risk
+
+def sure_sparsity(W):
+    #measure of sparsity of coefficient layer
+    N = float(len(W))
+    num = np.sum(W**2 - 1)
+    denom = (np.log(N)/np.log(2))**1.5
+    if denom == 0: denom = 1e-64
+    nu = num/(denom * np.sqrt(N))
+    
+    return nu
+
 def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", policy = "none"):
     #W: array full of wavelet coefficients
     #Possible flags, choice between:
@@ -552,8 +574,6 @@ def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", pol
 
     #if THRESHOLD is an integer, THRESHOLD is applied on every level
     #if it is an array, then THRESHOLD is level dependent
-
-    #Warning: Horrible code. Need to completely rehaul.
 
     shrink = shrink.lower()
     policy = policy.lower()
@@ -613,7 +633,6 @@ def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", pol
                 s2 = np.sum(roller**2, axis = 1)
 
                 sigma = np.median(np.abs(roller), axis = 1)/0.6745
-                #sigma = np.median(np.abs(np.diff(tw) - np.median(np.diff(tw)))) / np.sqrt(2) / 0.6745
 
                 beta = 1 - lam * L * sigma**2 / s2
                 beta[beta < 0] = 0
@@ -625,29 +644,32 @@ def threshold(W, LAM = -1,  MAX_LAYER = -1, N_ELEMENTS = 0, shrink = "hard", pol
                 currN >>= 1
 
 
-        """        
+                
         elif policy == "sure" and MAX_LAYER > 0:
             #sure stuff goes here
             #requires soft thresholding
             THRESHOLD = []
             shrink = "soft"
             layer = 0
-            while layer < MAX_LAYER-1 and i > 0:
+            start = 1
+            step = 2
+            while layer < MAX_LAYER-1 and step < N:
                 #pdb.set_trace()
-                w_target = W[i:j]
+                w_target = W[start::step]
                 sigma = np.median(np.abs(w_target))/0.6745
                 s = lambda t: sure(w_target, t, sigma)
-                lni = np.log(i)
+                lni = np.log(np.shape(w_target))
                 t0 = sigma*np.sqrt(2.0*lni)
                 #threshold minimizes SURE
                 #start with universal/2
-                t = opt.minimize(fun = s, x0 = t0/2, bounds = [[0, t0]])
+                tarray = opt.minimize(fun = s, x0 = t0/2, bounds = [[0, t0]], method = "TNC")
+                t = tarray["x"][0]
                 nu = sure_sparsity(w_target)
                 if nu <= 1: t = t0
                 THRESHOLD.append(t)
-                i >>= 1
-                j >>= 1
-        """
+                start *= 2
+                step *= 2
+        
 
     elif N_ELEMENTS > 0:
         #THRESHOLD = sorted([abs(i) for i in W], reverse=True)[N_ELEMENTS]
@@ -843,7 +865,7 @@ def coeff_pyramid(t, W, MAX_LAYER = -1, wavelet = "db4"):
     #basis functions
     fig2, axs2 = plt.subplots(MAX_LAYER+1, 1, sharex = True, sharey = True)
     fig2.suptitle(wavelet + " wavelet basis functions", fontsize = 20)
-
+    
     i = 0
 
     T = N >> (MAX_LAYER)
@@ -859,16 +881,16 @@ def coeff_pyramid(t, W, MAX_LAYER = -1, wavelet = "db4"):
         w_empty = np.zeros(N)
 
         if i == 0:
-            title_str = "Scaling Coeff (0 - {:.2f} Hz)".format(Fs /(1 << (MAX_LAYER - 1)))
+            title_str = " (0 - {:.2f} Hz)".format(Fs /(1 << (MAX_LAYER - 1)))
             layer_w = W[::step]
-            axs[i].set_title(title_str)
-            axs2[i].set_title(title_str)
+            axs[i].set_title("Scaling Coeff" + title_str)
+            axs2[i].set_title("Scaling Basis" +title_str)
             w_empty[::step] = W[::step]
 
         else:
-            title_str = "Wavelet Coeff level {:x} ({:.2f} - {:.2f} Hz)".format(i-1, max_freq, max_freq*2)
-            axs[i].set_title(title_str)
-            axs2[i].set_title(title_str)
+            title_str = " level {:x} ({:.2f} - {:.2f} Hz)".format(i-1, max_freq, max_freq*2)
+            axs[i].set_title("Wavelet Coeff" + title_str)
+            axs2[i].set_title("Wavelet Basis" + title_str)
 
             max_freq *= 2
             layer_w = W[start::step]
@@ -887,64 +909,42 @@ def coeff_pyramid(t, W, MAX_LAYER = -1, wavelet = "db4"):
 
     return [fig, fig2]
 
-if __name__ == "__main__":
-    #s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
-    N = 1024
-    x = np.linspace(0, 2, N)
-    s = doppler(x)
-
-    
-    ml = 7
-    wv = "legall53"
-    #print s
-    ds = dwt(np.copy(s), MAX_LAYER = ml, wavelet = wv)
-    #waveletprint(ds, MAX_LAYER = ml)
-    ids = idwt(np.copy(ds), MAX_LAYER = ml, wavelet = wv)
-    #print ids
-    approx_plot(x, np.copy(ds), MAX_LAYER = ml, wavelet = wv, f = s)
-    coeff_pyramid(x, ds, MAX_LAYER = ml, wavelet = wv)
-    
-    """
-    x = np.linspace(0, 2, N)
-    sigma = 0.30
+def thresh_test(t, s, sigma = 0.3, MAX_LAYER = -1, THRESH_LAYER = -1, wavelet = "db4"):
+    """tests thresholding"""
     noise = np.random.normal(loc = 0.0, scale = sigma, size = N)
-    #s = heavisine(x)
     rs = s + noise
-    ml = 1
-    wavelet_type = "cdf97"
-    #print s
-    ds = dwt(np.copy(s), MAX_LAYER = ml, wavelet = wavelet_type)
-    drs = dwt(np.copy(rs), MAX_LAYER = ml, wavelet = wavelet_type)
-    #print ds
-    #print interlace_to_layer(ds)
-    ids = idwt(np.copy(ds), MAX_LAYER = ml, wavelet = wavelet_type)
-    #print ids
 
-    #waveletprint(ds, MAX_LAYER = ml)
-    #coeff_pyramid(x, ds, MAX_LAYER = ml, wavelet = wavelet_type)
-    #approx_plot(x, ds, MAX_LAYER = ml, wavelet = wavelet_type, f = s)
-    """
+    ds = dwt(np.copy(s), MAX_LAYER = MAX_LAYER, wavelet = wavelet)
+    ids = idwt(np.copy(ds), MAX_LAYER = MAX_LAYER, wavelet = wavelet)
+    drs = dwt(np.copy(rs), MAX_LAYER = MAX_LAYER, wavelet = wavelet)
 
-    """
-    #coeff_pyramid(x, drs, MAX_LAYER = ml, wavelet = wavelet_type)
+    noise 
+    if THRESH_LAYER == -1: THRESH_LAYER = MAX_LAYER
+    
+    coeff_univ_hard = threshold(np.copy(drs), policy = "universal_level", MAX_LAYER = THRESH_LAYER, shrink = "hard")
+    coeff_univ_semisoft = threshold(np.copy(drs), policy = "universal_level", MAX_LAYER = THRESH_LAYER, shrink = "semisoft")
+    coeff_univ_soft = threshold(np.copy(drs), policy = "universal_level", MAX_LAYER = THRESH_LAYER, shrink = "soft")
+    coeff_sure_soft = threshold(np.copy(drs), policy = "sure", MAX_LAYER = THRESH_LAYER, shrink = "soft")
+    coeff_neighcoeff = threshold(np.copy(drs), policy = "neighcoeff", MAX_LAYER = THRESH_LAYER)
 
-    coeff_univ_level = threshold(np.copy(drs), policy = "universal_level", MAX_LAYER = 4)
-    coeff_univ = threshold(np.copy(drs), policy = "universal")
-    coeff_neighcoeff = threshold(np.copy(drs), policy = "neighcoeff", MAX_LAYER = 4)
-    #coeff_pyramid(x, drst, MAX_LAYER = ml, wavelet = wavelet_type)
-    #approx_plot(x, ds2, MAX_LAYER = ml, wavelet = wavelet_type)
-
-    univ_level = idwt(np.copy(coeff_univ_level), MAX_LAYER = ml, wavelet = wavelet_type)
-    univ = idwt(np.copy(coeff_univ), MAX_LAYER = ml, wavelet = wavelet_type)
-    neighcoeff = idwt(np.copy(coeff_neighcoeff), MAX_LAYER = ml, wavelet = wavelet_type)
+    univ_hard = idwt(np.copy(coeff_univ_soft), MAX_LAYER = MAX_LAYER, wavelet = wavelet)
+    univ_semisoft = idwt(np.copy(coeff_univ_semisoft), MAX_LAYER = MAX_LAYER, wavelet = wavelet)
+    univ_soft = idwt(np.copy(coeff_univ_soft), MAX_LAYER = MAX_LAYER, wavelet = wavelet)
+    sure = idwt(np.copy(coeff_sure_soft), MAX_LAYER = MAX_LAYER, wavelet = wavelet)
+    neighcoeff = idwt(np.copy(coeff_neighcoeff), MAX_LAYER = MAX_LAYER, wavelet = wavelet)
+    
     psnr_truth = psnr(s, ids)
     print "True PSNR:\t", psnr_truth
     psnr_noise = psnr(s, rs)
     print "Random PSNR:\t", psnr_noise
-    psnr_univ = psnr(s, univ)
-    print "Universal PSNR:\t", psnr_univ
-    psnr_univ_level = psnr(s, univ_level)
-    print "UnivLevel PSNR:\t", psnr_univ_level
+    psnr_univ_hard = psnr(s, univ_hard)
+    print "Univ Hard PSNR:\t", psnr_univ_hard
+    psnr_univ_semisoft = psnr(s, univ_semisoft)
+    print "Univ Semisoft PSNR:\t", psnr_univ_semisoft
+    psnr_univ_soft = psnr(s, univ_soft)
+    print "Univ Soft PSNR:\t", psnr_univ_soft
+    psnr_sure = psnr(s, sure)
+    print "SURE PSNR:\t", psnr_sure
     psnr_neighcoeff = psnr(s, neighcoeff)
     print "Neighcoeff PSNR:\t", psnr_neighcoeff
 
@@ -953,11 +953,43 @@ if __name__ == "__main__":
     ax.set_title(r"Denoising (AWGN, $\sigma$={:.2f})".format(sigma))
     ax.plot(x, s, label = "Ground Truth ({:.2f} dB)".format(psnr_truth))
     ax.plot(x, rs, label = "Noisy Data ({:.2f} dB)".format(psnr_noise))
-    ax.plot(x, univ, label = "Univ Threshold ({:.2f} dB)".format(psnr_univ))
-    ax.plot(x, univ_level, label = "Univ Level Threshold ({:.2f} dB)".format(psnr_univ_level))
+    ax.plot(x, univ_hard, label = "Univ Hard ({:.2f} dB)".format(psnr_univ_hard))
+    ax.plot(x, univ_semisoft, label = "Univ Semisoft ({:.2f} dB)".format(psnr_univ_semisoft))
+    ax.plot(x, univ_soft, label = "Univ Soft ({:.2f} dB)".format(psnr_univ_soft))
+    ax.plot(x, sure, label = "SURE ({:.2f} dB)".format(psnr_sure))
     ax.plot(x, neighcoeff, label = "Neighcoeff Threshold ({:.2f} dB)".format(psnr_neighcoeff))
     ax.legend(loc = "lower right")
+
+    return fig
+
+
+if __name__ == "__main__":
+    #s = np.array([32.0, 10.0, 20.0, 38.0, 37.0, 28.0, 38.0, 34.0, 18.0, 24.0, 18.0, 9.0, 23.0, 24.0, 28.0, 34.0])
+    N = 1024
+    x = np.linspace(0, 2, N)
+    s = blocks(x)
+    """wv = "db4"
+    ml = 7
+    ds = dwt(np.copy(s), MAX_LAYER = ml, wavelet = wv)
+    sigma = 0.3
+    [figa, figb] = coeff_pyramid(x, s, MAX_LAYER = ml, wavelet = wv)
+    #fig = thresh_test(x, s, sigma, MAX_LAYER = 5, THRESH_LAYER = 3, wavelet = "haar")
+    
+
     """
+    ml = 7
+    wv = "cdf97"
+    sigma = 0.3
+    #print s
+    ds = dwt(np.copy(s), MAX_LAYER = ml, wavelet = wv)
+    #waveletprint(ds, MAX_LAYER = ml)
+    ids = idwt(np.copy(ds), MAX_LAYER = ml, wavelet = wv)
+    #print ids
+    approx_plot(x, np.copy(ds), MAX_LAYER = ml, wavelet = wv, f = s)
+    coeff_pyramid(x, ds, MAX_LAYER = ml, wavelet = wv)
+    thresh_test(x, s, sigma, MAX_LAYER = ml, THRESH_LAYER = 3, wavelet = wv)
+    
+
 
     plt.show()
     
